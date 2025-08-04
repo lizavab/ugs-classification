@@ -1,0 +1,454 @@
+---
+title: "Classification of Urban Green Spaces with Random Forest"
+output: html_document
+date: "2024-03-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}
+library(sf) 
+library(randomForest)
+library(e1071)
+library(sp)
+library(raster)
+library(ggplot2)
+```
+
+```{r}
+setwd("/Users/lizavab/Documents/term-project")
+```
+
+### Data preparation
+
+## Data upload
+
+```{r}
+# read and brick PlanetScope images
+may <- brick("./2023_chp/CPH_2023_05_3_1_psscene_analytic_8b_sr_udm2/composite_clipped_may.tif")
+july <- brick("./2023_chp/CPH_2023_07_3_psscene_analytic_8b_sr_udm2/composite_clipped_july.tif")
+september <- brick("./2023_chp/CPH_2023_09_3_1_psscene_analytic_8b_sr_udm2/composite_clipped_september.tif")
+
+# read Danish DSM
+dsm <- raster('./dsm/dsm.tif')
+
+# read samples for training from a shp-file
+training_labels <- st_read("./training/lss_project_labes_reproj.shp")
+
+```
+## Satellite imagery processing
+
+```{r}
+# check extent of the images
+print("Initial extent")
+extent(may)
+extent(july)
+extent(september)
+
+extent(dsm)
+
+# resample july image to have the same resolution and extent as others 
+july_resampled <- resample(july, may, method="bilinear")
+print("Modified extent")
+extent(july_resampled)
+
+# resample Danish DSM to have the same resolution and extent as others 
+dsm_resampled <- resample(dsm, image20230530)
+extent(dsm_resampled)
+
+# stack images together
+may_july_stacked <- stack(may, july_resampled, dsm_resampled)
+may_sept_stacked <- stack(may, september, dsm_resampled)
+july_sept_stacked <- stack(july_resampled, september, dsm_resampled)
+may_july_sept_stacked <- stack(may, july_resampled, september, dsm_resampled)
+
+may <- stack(may, dsm_resampled)
+july_resampled <- stack(july_resampled, dsm_resampled)
+september <- stack(september, dsm_resampled)
+```
+
+## Plot the images
+
+```{r}
+plot(may)
+#plot(july_resampled)
+#plot(september)
+
+#plot(dem_resampled)
+
+```
+
+
+## Training sample processing
+
+```{r}
+# subset 30% of the data
+subset30 <- sample(c(1:dim(training_labels)[1]), dim(training_labels)[1] * 0.3)
+
+reference <- training_labels[subset30,]
+training <- training_labels[-subset30,]
+
+# plot training and validation data with ggplot
+ggplot() +
+  geom_sf(data = reference, color = "red3", alpha = 0.5) +  
+  geom_sf(data = training, color = "green3", alpha = 0.5) + 
+  theme_bw()
+
+# read samples for training and tuning (70%)
+yt <- training$class
+length(yt) 
+
+# read samples for reference-accuracy assessment (30%)
+yr <- reference$class
+length(yr)
+
+# read samples for full training (100%)
+yf <- training_labels$class
+
+table(yt)
+table(y1)
+table(yf)
+```
+
+```{r}
+# extract data for training data (70%)
+x1 <- extract(x=may, y=training) # may
+x2 <- extract(x=july_resampled, y=training) # july
+x3 <- extract(x=september, y=training) # september
+x4 <- extract(x=may_july_stacked, y=training) # two images stacked
+x5 <- extract(x=may_sept_stacked, y=training)
+x6 <- extract(x=july_sept_stacked, y=training)
+x7 <- extract(x=may_july_sept_stacked, y=training) # three images stacked
+
+# extract data for reference data (30%)
+x1r <- extract(x=may, y=reference) # may
+x2r <- extract(x=july_resampled, y=reference) # july
+x3r <- extract(x=september, y=reference) # september
+x4r <- extract(x=may_july_stacked, y=reference) # two images stacked
+x5r <- extract(x=may_sept_stacked, y=reference)
+x6r <- extract(x=july_sept_stacked, y=reference)
+x7r <- extract(x=may_july_sept_stacked, y=reference) # three images stacked
+
+# extract data for full dataset (100%)
+x1f <- extract(x=may, y=training_labels) # may
+x2f <- extract(x=july_resampled, y=training_labels) # july
+x3f <- extract(x=september, y=training_labels) # september
+x4f <- extract(x=may_july_stacked, y=training_labels) # two images stacked
+x5f <- extract(x=may_sept_stacked, y=training_labels)
+x6f <- extract(x=july_sept_stacked, y=training_labels)
+x7f <- extract(x=may_july_sept_stacked, y=training_labels) # three images stacked
+```
+
+### Model tuning, parameters selection and training
+## May
+```{r}
+rf1.tune.results <- tune(randomForest,train.x=x1,train.y=as.factor(yt),
+                         reference.x=x1r, reference.y=as.factor(yr),
+                         tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf1.tune.results
+```
+```{r}
+rf1=randomForest(x=x1f,y=as.factor(yf), ntree=100,mtry=4,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf1
+```
+## July
+```{r}
+rf2.tune.results <- tune(randomForest,train.x=x2,train.y=as.factor(yt),reference.x=x2r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf2.tune.results
+```
+
+```{r}
+rf2=randomForest(x=x2f,y=as.factor(yf), ntree=100,mtry=4,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf2
+```
+## September
+```{r}
+rf3.tune.results <- tune(randomForest,train.x=x3,train.y=as.factor(yt),reference.x=x3r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf3.tune.results
+```
+
+```{r}
+rf3=randomForest(x=x3f,y=as.factor(yf), ntree=400,mtry=2,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf3
+```
+## May & July
+```{r}
+rf4.tune.results <- tune(randomForest,train.x=x4,train.y=as.factor(yt),reference.x=x4r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf4.tune.results
+```
+
+```{r}
+rf4=randomForest(x=x4f,y=as.factor(yf), ntree=200,mtry=3,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf4
+```
+
+## May & September
+```{r}
+rf5.tune.results <- tune(randomForest,train.x=x5,train.y=as.factor(yt),reference.x=x5r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf5.tune.results
+```
+
+```{r}
+rf5=randomForest(x=x5f,y=as.factor(yf), ntree=300,mtry=5,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf5
+```
+
+## July & September
+```{r}
+rf6.tune.results <- tune(randomForest,train.x=x6,train.y=as.factor(yt),reference.x=x6r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf6.tune.results
+```
+
+```{r}
+rf6=randomForest(x=x6f,y=as.factor(yf), ntree=300,mtry=3,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf6
+```
+
+## May, July & September
+```{r}
+rf7.tune.results <- tune(randomForest,train.x=x7,train.y=as.factor(yt),reference.x=x7r, reference.y=as.factor(yr),
+                        tunecontrol = tune.control(sampling = "fix"), ranges = list(ntree=seq(100,500,100),mtry=2:6))
+
+rf7.tune.results
+```
+
+```{r}
+rf7=randomForest(x=x7f,y=as.factor(yf), ntree=100,mtry=4,importance=TRUE,oob.prox =FALSE,keep.forest=T)
+rf7
+```
+### Accuracy assessement
+
+```{r}
+yp=predict(rf7, x7r)
+cm<-table(yp,yr)
+cm
+(OA<-sum(diag(cm))/sum(cm))
+(PA<-diag(cm)/apply(cm,2,sum)) #producer's accuracy (recall, sensitivity)
+(UA<-diag(cm)/apply(cm,1,sum))
+```
+
+
+## Overall, User's and Producer's accuracies
+
+```{r}
+
+ACC<-matrix(0,7,c(1+1+4+4))
+
+# the loop takes model one by one and puts the results into a list
+for (i in 1:7) {
+  model_name <- paste0("rf", i)
+  ref_data_name <- paste0("x", i, "r")
+  
+  model <- get(model_name)
+  ref_data <- get(ref_data_name)
+  
+  yp <- predict(model, ref_data)
+  
+  # calculate confusion matrix and accuracy metrics
+  cm <- table(yp, yr) 
+  OA <- sum(diag(cm)) / sum(cm)
+  PA <- diag(cm) / colSums(cm) # Producer's accuracy
+  UA <- diag(cm) / rowSums(cm) # User's accuracy
+
+  ACC[i,] <- c(model_name,OA,UA,PA)
+} 
+
+# create df and save as csv
+ACC<-data.frame(ACC)
+names(ACC) <- c("classifier","OA",paste0("UA",c(1:4)),paste0("PA",c(1:4)))
+#write.csv(ACC,"./outputs/ref_accuracies.csv",row.names=F)
+
+```
+
+## Predicted labels
+
+```{r}
+# Initialize an empty list to store predictions
+predictions <- list()
+
+# loop through each model and its corresponding data
+for (i in 1:7) {
+  
+  model_name <- paste0("rf", i)
+  ref_data_name <- paste0("x", i, "r")
+  
+  model <- get(model_name)
+  ref_data <- get(ref_data_name)
+  
+  predictions[[i]] <- predict(model, ref_data)
+}
+
+# convert the list of predictions to a data frame
+reference_predicted <- data.frame(predictions)
+
+names(reference_predicted) <- paste0("rf", 1:7)
+
+# add ground truth 
+reference_predicted$gt <- yr
+
+# write the dataframe to a CSV file
+#write.csv(reference_predicted, "./outputs/predicted_labels.csv", row.names = FALSE)
+
+```
+
+### Feature importance
+
+```{r}
+best <- rf5
+
+# based on the best model
+names(best)
+best$importance
+
+# standarized feature importance
+sd_FI <- best$importance[,5]/best$importanceSD[,5]
+sd_FI <- sd_FI[order(sd_FI)]
+
+par(mar = c(10, 4, 4, 0),xpd = TRUE)#b,l,t,r
+fi_plot <- barplot(sd_FI,las=2,ylab="Standarized Importance", col = "skyblue")
+#text(x=8,y=-15,labels="Feature")
+
+ggsave("./outputs/fi.svg", plot = fi_plot, device = 'svg')
+
+# Open SVG device
+svg("./outputs/fi.svg")
+
+# Set plot margins and create the plot
+par(mar = c(10, 4, 4, 0), xpd = TRUE) # Bottom, left, top, right
+barplot(sd_FI, las = 2, ylab = "Standardized Importance", col = "skyblue")
+# Optional: Add text or other elements to the plot here
+
+# Close the SVG device
+dev.off()
+```
+
+### Classification
+
+```{r}
+# running classification 
+map.rf<-predict(may_sept_stacked,rf1)
+
+# saving classification results
+raster::writeRaster(map.rf,"./outputs/rf5_classified.tif",overwrite=TRUE)
+
+
+# plotting the results
+plot(map.rf)
+plot.new() 
+levels(map.rf)[[1]][["VALUE"]]<-c("Built-up area","Water","Woody vegetation","Non-woody vegetation") 
+plot(map.rf,col=c("red3","skyblue","#186218","#bfee90"))
+#legend("topleft",levels(map.rf)[[1]][["VALUE"]],fill=c("red3","skyblue","#186218","#bfee90"),cex=.6)
+
+```
+
+
+### Test
+
+## Best model
+
+```{r}
+# read samples for test
+test <- st_read("./test/Random_sampling.shp")
+#plot(test['Class'],col=c("red3","skyblue","#186218","#bfee90"))
+
+ytest <- test$Class
+length(ytest) 
+
+best_model = rf5
+best_image = may_sept_stacked
+  
+xbest <- extract(x=best_image, y=test) # may
+
+test_pred <- predict(best_model, xbest)
+  
+# calculate confusion matrix and accuracy metrics
+(cm <- table(test_pred, ytest))
+(OA <- sum(diag(cm)) / sum(cm))
+(PA <- diag(cm) / colSums(cm))
+(UA <- diag(cm) / rowSums(cm))
+```
+
+## Compare prediction of all models
+
+```{r}
+# extract data for test samples
+x1test <- extract(x=may, y=test) # may
+x2test <- extract(x=july_resampled, y=test) # july
+x3test <- extract(x=september, y=test) # september
+x4test <- extract(x=may_july_stacked, y=test) # two images stacked
+x5test <- extract(x=may_sept_stacked, y=test)
+x6test <- extract(x=july_sept_stacked, y=test)
+x7test <- extract(x=may_july_sept_stacked, y=test) # three images stacked
+
+# Initialize an empty list to store predictions
+test_predictions <- list()
+
+# loop through each model and its corresponding data
+for (i in 1:7) {
+  
+  model_name <- paste0("rf", i)
+  test_data_name <- paste0("x", i, "test")
+  
+  model <- get(model_name)
+  test_data <- get(test_data_name)
+  
+  test_predictions[[i]] <- predict(model, test_data)
+}
+
+# convert the list of predictions to a data frame
+test_predicted <- data.frame(test_predictions)
+
+names(test_predicted) <- paste0("rf", 1:7)
+
+# add ground truth 
+test_predicted$gt <- ytest
+
+# write the dataframe to a CSV file
+#write.csv(test_predicted, "./outputs/predicted_test_labels_final.csv", row.names = FALSE)
+
+```
+
+## Overall, User's and Producer's accuracies for test data
+
+```{r}
+
+ACC<-matrix(0,7,c(1+1+4+4))
+
+# the loop takes model one by one and puts the results into a list
+for (i in 1:7) {
+  model_name <- paste0("rf", i)
+  test_data_name <- paste0("x", i, "test")
+  
+  model <- get(model_name)
+  test_data <- get(test_data_name)
+  
+  yp <- predict(model, test_data)
+  
+  # calculate confusion matrix and accuracy metrics
+  cm <- table(yp, ytest) 
+  OA <- sum(diag(cm)) / sum(cm)
+  PA <- diag(cm) / colSums(cm) # Producer's accuracy
+  UA <- diag(cm) / rowSums(cm) # User's accuracy
+
+  ACC[i,] <- c(model_name,OA,UA,PA)
+} 
+
+# create df and save as csv
+ACC<-data.frame(ACC)
+names(ACC) <- c("classifier","OA",paste0("UA",c(1:4)),paste0("PA",c(1:4)))
+#write.csv(ACC,"./outputs/ref_accuracies_final.csv",row.names=F)
+
+```
