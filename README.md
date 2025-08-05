@@ -6,7 +6,7 @@ This project used high-resolution satellite imagery from PlanetScope and Danish 
 ```
 ├── README.md
 ├── code/
-│   ├── UGS_RF_classification.Rmd
+│   └── UGS_RF_classification.Rmd
 └── figs/
     ├── final_classification.png
     └── methods_flowchart.png
