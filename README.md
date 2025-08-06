@@ -10,7 +10,6 @@ This project used high-resolution satellite imagery from PlanetScope and Danish 
 └── figs/
     ├── final_classification.png
     └── methods_flowchart.png
-
 ```
 
 ### Overview of the methodology
@@ -29,4 +28,4 @@ The test data was generated independently using a random sampling tool in QGIS 3
 ### Final classification
 ![](figs/final_classification.png)
 
-The project was completed in March 2024.
+The project was completed together with Louise Rye Svendsen as a part of MSc course in March 2024.
