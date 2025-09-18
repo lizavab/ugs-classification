@@ -6,6 +6,7 @@ This project used high-resolution satellite imagery from PlanetScope and Danish 
 ```
 ├── README.md
 ├── code/
+│   ├── McNemars_test.R
 │   └── UGS_RF_classification.Rmd
 └── figs/
     ├── final_classification.png
